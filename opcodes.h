@@ -48,7 +48,7 @@
 
 #define BVS_REL 0x70
 
-#define CLC_REL 0x18
+#define CLC_IMPL 0x18
 
 #define CLD_IMPL 0xD8
 
