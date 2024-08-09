@@ -72,10 +72,6 @@ Byte read_from_pc() {
     return val;
 }
 
-void set_pc(Word val) {
-    cpu.PC = val;
-}
-
 void adc(CPU *cpu, Byte val) {
     Word result = cpu->A + val + cpu->C;
 
@@ -106,21 +102,21 @@ void and(CPU *cpu, Byte val) {
 void cmp (CPU *cpu, Byte val) {
     Byte ans = cpu->A - val;
     if (ans == 0x00) cpu->Z = 1;
-    if (ans >= 0x00) cpu->C = 1;
+    if (cpu->A >= val) cpu->C = 1;
     cpu->N = (ans & 0x80) != 0;
 }
 
 void cpx (CPU *cpu, Byte val) {
     Byte ans = cpu->X - val;
     if (ans == 0x00) cpu->Z = 1;
-    if (ans >= 0x00) cpu->C = 1;
+    if (cpu->X >= val) cpu->C = 1;
     cpu->N = (ans & 0x80) != 0;
 }
 
 void cpy (CPU *cpu, Byte val) {
     Byte ans = cpu->Y - val;
     if (ans == 0x00) cpu->Z = 1;
-    if (ans >= 0x00) cpu->C = 1;
+    if (cpu->Y >= val) cpu->C = 1;
     cpu->N = (ans & 0x80) != 0;
 }
 
@@ -144,6 +140,53 @@ void inc(CPU *cpu, Word addr) {
     cpu->Z = (val == 0) ? 1: 0;
     cpu->N = (val & 0x80) != 0;
     write_byte(addr, val);
+}
+
+void lda(CPU *cpu, Byte val) {
+    cpu->A = val;
+    cpu->Z = (cpu->A == 0) ? 1 : 0;
+    cpu->N = (cpu->A & 0x80) != 0;
+}
+
+void ldx(CPU *cpu, Byte val) {
+    cpu->X = val;
+    cpu->Z = (cpu->X == 0) ? 1 : 0;
+    cpu->N = (cpu->X & 0x80) != 0;
+}
+
+void ldy(CPU *cpu, Byte val) {
+    cpu->Y = val;
+    cpu->Z = (cpu->Y == 0) ? 1 : 0;
+    cpu->N = (cpu->Y & 0x80) != 0;
+}
+
+void lsr(CPU *cpu, Word addr) {
+    Byte val = read_byte(addr);
+    val = val >> 1;
+    cpu->C = ((val & 0x01) != 0);
+    cpu->Z = (val == 0x00);
+    cpu->N = (val & 0x80) != 0;
+    write_byte(addr, val);
+}
+
+void ora(CPU *cpu, Byte val) {
+    cpu->A = cpu->A | val;
+    cpu->Z = (cpu->A == 0x00) ? 1 : 0;
+    cpu->N = (cpu->A & 0x80) != 0;
+}
+
+void rol(CPU *cpu, Byte val) {
+    cpu->C =  (val & 0x80) != 0;
+    val = val << 1;
+    cpu->Z = (val == 0x00);
+    cpu->N = (val & 0x80) != 0;
+}
+
+void ror(CPU *cpu, Byte val) {
+    cpu->C =  (val & 0x80) != 0;
+    val = val >> 1;
+    cpu->Z = (val == 0x00);
+    cpu->N = (val & 0x80) != 0;
 }
 
 void print_debug() {
@@ -592,8 +635,7 @@ void execute_instructions() {
         case DEC_ZPX: {
             printf("DEC_ZPX\n");
             Word addr = (Word)read_from_pc();
-            Byte val = read_byte(addr + cpu.X);
-            dec(&cpu, addr);
+            dec(&cpu, addr + cpu.X);
             break;
         }
         case DEC_ABSX: {
@@ -721,13 +763,15 @@ void execute_instructions() {
             printf("INX_IMPL\n");
             cpu.X++;
             cpu.Z = (cpu.X == 0) ? 1: 0;
-            cpu.N = (cpu.X & 0x80) != 0;
+            cpu.N = ((cpu.X & 0x80) != 0);
+            break;
         }
         case INY_IMPL: {
             printf("INY_IMPL\n");
             cpu.Y++;
             cpu.Z = (cpu.X == 0) ? 1 : 0;
-            cpu.N = (cpu.X & 0x80) != 0;
+            cpu.N = ((cpu.X & 0x80) != 0);
+            break;
         }
         case JMP_ABS: {
             printf("JMP_ABS\n");
@@ -748,6 +792,383 @@ void execute_instructions() {
         }
         case JSR_ABS: {
             printf("JSR_ABS\n");
+            Word addr1 = (Word)read_from_pc();
+            Byte addr2 = read_from_pc();
+            addr1 = (addr1) | (addr2 << 8);
+            cpu.PC = addr1;
+            Word ret_addr = cpu.PC - 1;
+            push_to_stack((Byte)((ret_addr >> 8) & 0xFF));
+            push_to_stack((Byte)(ret_addr & 0xFF));
+            break;
+        }
+        case LDA_IM: {
+            printf("LDA_IM\n");
+            Byte val = read_from_pc();
+            lda(&cpu, val);
+            break;
+        }
+        case LDA_ZP: {
+            printf("LDA_ZP\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr);
+            lda(&cpu, val);
+            break;
+        }
+        case LDA_ZPX: {
+            printf("LDA_ZPX\n");
+            Word addr = (Word)read_from_pc();
+            addr += cpu.X;
+            Byte val = read_byte(addr);
+            lda(&cpu, val);
+            break;
+        }
+        case LDA_ABS: {
+            printf("LDA_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            Byte val = read_byte(addr);
+            lda(&cpu, val);
+            break;
+        }
+        case LDA_ABSX: {
+            printf("LDA_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            Byte val = read_byte(addr);
+            lda(&cpu, val);
+            break;
+        }
+        case LDA_ABSY: {
+            printf("LDA_ABSY\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.Y;
+            Byte val = read_byte(addr);
+            lda(&cpu, val);
+            break;
+        }
+        case LDA_INDX: {
+            printf("LDA_INDX\n");
+            Word addr = (Word)read_from_pc();
+            addr += (Word)cpu.X;
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr + 1);
+            addr = ((high << 8) | low);
+            Byte val = read_byte(addr);
+            lda(&cpu, val);
+            break;
+        }
+        case LDA_INDY: {
+            printf("LDA_INDY\n");
+            Word addr = (Word)read_from_pc();
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr);
+            addr = ((high << 8) | low) + (Word)cpu.Y;
+            Byte val = read_byte(addr);
+            lda(&cpu, val);
+            break;
+        }
+        case LDX_IM: {
+            printf("LDX_IM\n");
+            Byte val = read_from_pc();
+            ldx(&cpu, val);
+            break;
+        }
+        case LDX_ZP: {
+            printf("LDX_ZP\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr);
+            ldx(&cpu, val);
+            break;
+        }
+        case LDX_ZPY: {
+            printf("LDX_ZPY\n");
+            Word addr = (Word)read_from_pc();
+            addr += cpu.Y;
+            Byte val = read_byte(addr);
+            ldx(&cpu, val);
+            break;
+        }
+        case LDX_ABS: {
+            printf("LDX_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            Byte val = read_byte(addr);
+            ldx(&cpu, val);
+            break;
+        }
+        case LDX_ABSY: {
+            printf("LDX_ABSY\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.Y;
+            Byte val = read_byte(addr);
+            ldx(&cpu, val);
+            break;
+        }
+        case LDY_IM: {
+            printf("LDY_IM\n");
+            Byte val = read_from_pc();
+            ldy(&cpu, val);
+            break;
+        }
+        case LDY_ZP: {
+            printf("LDY_ZP\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr);
+            ldy(&cpu, val);
+            break;
+        }
+        case LDY_ZPX: {
+            printf("LDY_ZPY\n");
+            Word addr = (Word)read_from_pc();
+            addr += cpu.X;
+            Byte val = read_byte(addr);
+            ldy(&cpu, val);
+            break;
+        }
+        case LDY_ABS: {
+            printf("LDY_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            Byte val = read_byte(addr);
+            ldy(&cpu, val);
+            break;
+        }
+        case LDY_ABSX: {
+            printf("LDY_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            Byte val = read_byte(addr);
+            ldy(&cpu, val);
+            break;
+        }
+        case LSR_ACC: {
+            printf("LSR_ACC\n");
+            cpu.A = cpu.A >> 1;
+            cpu.C = ((cpu.A & 0x01) != 0);
+            cpu.Z = (cpu.A == 0x00);
+            cpu.N = (cpu.A & 0x80) != 0;
+            break;
+        }
+        case LSR_ABS: {
+            printf("LSR_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            lsr(&cpu, addr);
+            break;
+        }
+        case LSR_ABSX: {
+            printf("LSR_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            lsr(&cpu, addr);
+            break;
+        }
+        case LSR_ZP: {
+            printf("LSR_ZP\n");
+            Word addr = (Word)read_from_pc();
+            lsr(&cpu, addr);
+            break;
+        }
+        case LSR_ZPX: {
+            printf("LSR_ZPX\n");
+            Word addr = (Word)read_from_pc();
+            addr += cpu.X;
+            lsr(&cpu, addr);
+            break;
+        }
+        case NOP_IMPL: {
+            printf("NOP_IMPL\n");
+            break;
+        }
+        case ORA_IM: {
+            printf("ORA_IM\n");
+            Byte val = read_from_pc();
+            ora(&cpu, val);
+            break;
+        }
+        case ORA_ZP: {
+            printf("ORA_ZP\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr);
+            ora(&cpu, val);
+            break;
+        }
+        case ORA_ZPX: {
+            printf("ORA_ZPX\n");
+            Word addr = (Word)read_from_pc();
+            addr += cpu.Y;
+            Byte val = read_byte(addr);
+            ora(&cpu, val);
+            break;
+        }
+        case ORA_ABS: {
+            printf("ORA_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            Byte val = read_byte(addr);
+            ora(&cpu, val);
+            break;
+        }
+        case ORA_ABSX: {
+            printf("ORA_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            Byte val = read_byte(addr);
+            ora(&cpu, val);
+            break;
+        }
+        case ORA_ABSY: {
+            printf("ORA_ABSY\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.Y;
+            Byte val = read_byte(addr);
+            ora(&cpu, val);
+            break;
+        }
+        case ORA_INDX: {
+            printf("ORA_INDX\n");
+            Word addr = (Word)read_from_pc();
+            addr += (Word)cpu.X;
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr + 1);
+            addr = ((high << 8) | low);
+            Byte val = read_byte(addr);
+            ora(&cpu, val);
+            break;
+        }
+        case ORA_INDY: {
+            printf("ORA_INDY\n");
+            Word addr = (Word)read_from_pc();
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr);
+            addr = ((high << 8) | low) + (Word)cpu.Y;
+            Byte val = read_byte(addr);
+            ora(&cpu, val);
+            break;
+        }
+        case PHA_IMPL: {
+            printf("PHA_IMPL\n");
+            push_to_stack(cpu.A);
+            break;
+        }
+        case PHP_IMPL: {
+            printf("PHP_IMPL\n");
+            push_to_stack((Byte)(cpu.N << 7 | cpu.V << 6 | 1 << 5 | cpu.B << 4 | cpu.D << 3 | cpu.I << 2 | cpu.Z << 1 | cpu.C));
+            break;
+        }
+        case PLA_IMPL: {
+            printf("PLA_IMPL\n");
+            cpu.A = pop_from_stack();
+            cpu.Z = (cpu.A == 0x00) ? 1 : 0;
+            cpu.N = (cpu.A & 0x80) != 0;
+            break;
+        }
+        case PLP_IMPL: {
+            printf("PLP_IMPL\n");
+            Byte val = pop_from_stack();
+            cpu.N = (val & (1 << 7)) != 0;
+            cpu.V = (val & (1 << 6)) != 0;
+            cpu.B = (val & (1 << 4)) != 0;
+            cpu.D = (val & (1 << 3)) != 0;
+            cpu.I = (val & (1 << 2)) != 0;
+            cpu.Z = (val & (1 << 1)) != 0;
+            cpu.C = (val & (1)) != 0;
+            break;
+        }
+        case ROL_ACC: {
+            printf("ROL_ACC\n");
+            cpu.C =  (cpu.A & 0x80) != 0;
+            cpu.A = cpu.A << 1;
+            cpu.Z = (cpu.A == 0x00);
+            cpu.N = (cpu.A & 0x80) != 0;
+            break;
+        }
+        case ROL_ZP: {
+            printf("ROL_ZP\n");
+            Word addr = (Word) read_from_pc();
+            Byte val = read_byte(addr);
+            rol(&cpu, val);
+            break;
+        }
+        case ROL_ZPX: {
+            printf("ROL_ZPX\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr + cpu.X);
+            rol(&cpu, val);
+            break;
+        }
+        case ROL_ABS: {
+            printf("ROL_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            Byte val = read_byte(addr);
+            rol(&cpu, val);
+            break;
+        }
+        case ROL_ABSX: {
+            printf("ROL_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            Byte val = read_byte(addr);
+            rol(&cpu, val);
+            break;
+        }
+        case ROR_ACC: {
+            printf("ROR_ACC\n");
+            cpu.C =  (cpu.A & 0x80) != 0;
+            cpu.A = cpu.A >> 1;
+            cpu.Z = (cpu.A == 0x00);
+            cpu.N = (cpu.A & 0x80) != 0;
+            break;
+        }
+        case ROR_ZP: {
+            printf("ROR_ZP\n");
+            Word addr = (Word) read_from_pc();
+            Byte val = read_byte(addr);
+            ror(&cpu, val);
+            break;
+        }
+        case ROR_ZPX: {
+            printf("ROR_ZPX\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr + cpu.X);
+            ror(&cpu, val);
+            break;
+        }
+        case ROR_ABS: {
+            printf("ROR_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            Byte val = read_byte(addr);
+            ror(&cpu, val);
+            break;
+        }
+        case ROR_ABSX: {
+            printf("ROR_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            Byte val = read_byte(addr);
+            ror(&cpu, val);
+            break;
+        }
+        case RTI_IMPL: {
+            printf("RTI_IMPL\n");
 
             break;
         }
