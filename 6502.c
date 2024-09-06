@@ -20,13 +20,13 @@ typedef struct {
 
     Byte A, X, Y;    // Registers
 
-    Byte C : 1; // carry flag
+    Byte C : 1; // carry flag (LSB)
     Byte Z : 1; // zero flag
     Byte I : 1; // interrupt disable flag
     Byte D : 1; // decimal flag
     Byte B : 1; // break flag
     Byte V : 1; // overflow flag
-    Byte N : 1; // negative flag
+    Byte N : 1; // negative flag (MSB)
 } CPU;
 
 CPU cpu;
@@ -41,6 +41,10 @@ void cpu_reset() {
 
 void init_mem() {
     memset(mem.Data, 0, 0x10000);
+}
+
+Byte peek_stack() {
+    return mem.Data[0x100 + cpu.SP];
 }
 
 void push_to_stack(Byte val) {
@@ -187,6 +191,28 @@ void ror(CPU *cpu, Byte val) {
     val = val >> 1;
     cpu->Z = (val == 0x00);
     cpu->N = (val & 0x80) != 0;
+}
+
+void sbc(CPU *cpu, Byte val) {
+    Word result = (Word)cpu->A - (Word)val - (1 - cpu->C);
+    cpu->Z = (result & 0xFF) == 0x00;
+    cpu->N = (result & 0x80) != 0;
+    cpu->C = (result < 0x100);
+    cpu->V = (((cpu->A ^ result ) & (val ^ result)) & 0x80) != 0;
+    cpu->A = (Byte)(result & 0xFF);
+
+}
+
+void sta(CPU *cpu, Word mem) {
+    write_byte(mem, cpu->A);
+}
+
+void stx(CPU *cpu, Word mem) {
+    write_byte(mem, cpu->X);
+}
+
+void sty(CPU *cpu, Word mem) {
+    write_byte(mem, cpu->Y);
 }
 
 void print_debug() {
@@ -469,7 +495,19 @@ void execute_instructions() {
         }
         case BRK_IMPL: {
             printf("BRK_IMPL\n");
-            // unimplemented
+            push_to_stack(((cpu.PC + 2) >> 8) & 0xFF);
+            push_to_stack((cpu.PC+2) & 0xFF);
+
+            Byte Status = ((cpu.N) << 7) | (cpu.V << 6) | (1 << 5) | (cpu.B << 4) | (cpu.D << 3) | (cpu.I << 2) | (cpu.Z << 1) | (cpu.C << 0);
+            Status |= 0x10;
+            push_to_stack(Status);
+
+            cpu.I = 1;
+            cpu.B = 1;
+
+            Byte low = read_byte(0xFFFE);
+            Byte high = read_byte(0xFFFF);
+            cpu.PC = (high << 8) | low;
             break;
         }
         case BVC_REL: {
@@ -1169,7 +1207,245 @@ void execute_instructions() {
         }
         case RTI_IMPL: {
             printf("RTI_IMPL\n");
+            Byte val = pop_from_stack();
+            cpu.N = (val & (1 << 7)) != 0;
+            cpu.V = (val & (1 << 6)) != 0;
+            cpu.B = (val & (1 << 4)) != 0;
+            cpu.D = (val & (1 << 3)) != 0;
+            cpu.I = (val & (1 << 2)) != 0;
+            cpu.Z = (val & (1 << 1)) != 0;
+            cpu.C = (val & (1)) != 0;
 
+            Byte low = pop_from_stack();
+            Byte high = pop_from_stack();
+            cpu.PC = ((high << 8) | low);
+            break;
+        }
+        case RTS_IMPL: {
+            printf("RTS_IMPL\n");
+            Byte low = pop_from_stack();
+            Byte high = pop_from_stack();
+            cpu.PC = ((high << 8) | low) + 1;
+            break;
+        }
+        case SBC_IM: {
+            printf("SBC_IM\n");
+            Byte val = read_from_pc();
+            sbc(&cpu, val);
+            break;
+        }
+        case SBC_ZP: {
+            printf("SBC_ZP\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr);
+            sbc(&cpu, val);
+            break;
+        }
+        case SBC_ZPX: {
+            printf("SBC_ZPX\n");
+            Word addr = (Word)read_from_pc();
+            Byte val = read_byte(addr + cpu.X);
+            sbc(&cpu, val);
+            break;
+        }
+        case SBC_ABS: {
+            printf("SBC_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            Byte val = read_byte(addr);
+            sbc(&cpu, val);
+            break;
+        }
+        case SBC_ABSX: {
+            printf("SBC_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            Byte val = read_byte(addr);
+            sbc(&cpu, val);
+            break;
+        }
+        case SBC_ABSY: {
+            printf("SBC_ABSY\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.Y;
+            Byte val = read_word(addr);
+            cmp(&cpu, val);
+            break;
+        }
+        case SBC_INDX: {
+            printf("SBC_INDX\n");
+            Word addr = (Word)read_from_pc();
+            addr += (Word)cpu.X;
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr + 1);
+            addr = ((high << 8) | low);
+            Byte val = read_byte(addr);
+            sbc(&cpu, val);
+            break;
+        }
+        case SBC_INDY: {
+            printf("SBC_INDY\n");
+            Word addr = (Word)read_from_pc();
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr);
+            addr = ((high << 8) | low) + (Word)cpu.Y;
+            Byte val = read_byte(addr);
+            sbc(&cpu, val);
+            break;
+        }
+        case SEC_IMPL: {
+            printf("SEC_IMPL\n");
+            cpu.C = 1;
+            break;
+        }
+        case SED_IMPL: {
+            printf("SED_IMPL\n");
+            cpu.D = 1;
+            break;
+        };
+        case SEI_IMPL: {
+            printf("SEI_IMPL\n");
+            cpu.I = 1;
+            break;
+        }
+        case STA_ZP: {
+            printf("STA_ZP\n");
+            Word addr = (Word)read_from_pc();
+            sta(&cpu, addr);
+            break;
+        }
+        case STA_ZPX: {
+            printf("STA_ZPX\n");
+            Word addr = (Word)read_from_pc() + cpu.X;
+            sta(&cpu, addr);
+            break;
+        }
+        case STA_ABS: {
+            printf("STA_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            sta(&cpu, addr);
+            break;
+        }
+        case STA_ABSX: {
+            printf("STA_ABSX\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.X;
+            sta(&cpu, addr);
+            break;
+        }
+        case STA_ABSY: {
+            printf("STA_ABSY\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = ((addr << 8) | addr2) + cpu.Y;
+            sta(&cpu, addr);
+            break;
+        }
+        case STA_INDX: {
+            printf("STA_INDX\n");
+            Word addr = (Word)read_from_pc();
+            addr += (Word)cpu.X;
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr + 1);
+            addr = ((high << 8) | low);
+            sta(&cpu, addr);
+            break;
+        }
+        case STA_INDY: {
+            printf("STA_INDY\n");
+            Word addr = (Word)read_from_pc();
+            Word low = (Word)read_byte(addr);
+            Word high = (Word)read_byte(addr);
+            addr = ((high << 8) | low) + (Word)cpu.Y;
+            sta(&cpu, addr);
+            break;
+        }
+        case STX_ZP: {
+            printf("STX_ZP\n");
+            Word addr = (Word)read_from_pc();
+            stx(&cpu, addr);
+            break;
+        }
+        case STX_ZPY: {
+            printf("STX_ZPY\n");
+            Word addr = (Word)read_from_pc();
+            addr += cpu.Y;
+            stx(&cpu, addr);
+            break;
+        }
+        case STX_ABS: {
+            printf("STX_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            stx(&cpu, addr);
+            break;
+        }
+        case STY_ZP: {
+            printf("STY_ZP\n");
+            Word addr = (Word)read_from_pc();
+            sty(&cpu, addr);
+            break;
+        }
+        case STY_ZPX: {
+            printf("STY_ZPY\n");
+            Word addr = (Word)read_from_pc();
+            addr += cpu.X;
+            sty(&cpu, addr);
+            break;
+        }
+        case STY_ABS: {
+            printf("STY_ABS\n");
+            Word addr = (Word)read_from_pc();
+            Word addr2 = (Word)read_from_pc();
+            addr = (addr << 8) | addr2;
+            sty(&cpu, addr);
+            break;
+        }
+        case TAX_IMPL: {
+            printf("TAX_IMPL\n");
+            cpu.X = cpu.A;
+            cpu.Z = (cpu.X == 0x00);
+            cpu.N = ((cpu.X & 0x80) != 0);
+            break;
+        }
+        case TAY_IMPL: {
+            printf("TAY_IMPL\n");
+            cpu.Y = cpu.A;
+            cpu.Z = (cpu.Y == 0x00);
+            cpu.N = ((cpu.Y & 0x80) != 0);
+            break;
+        }
+        case TSX_IMPL: {
+            printf("TSX_IMPL\n");
+            cpu.X = peek_stack();
+            cpu.Z = (cpu.X == 0x00);
+            cpu.N = (cpu.X & 0x80) != 0;
+            break;
+        }
+        case TXA_IMPL: {
+            printf("TXA_IMPL\n");
+            cpu.A = cpu.X;
+            cpu.Z = (cpu.A == 0x00);
+            cpu.N = (cpu.A & 0x80) != 0;
+            break;
+        }
+        case TXS_IMPL: {
+            printf("TXS_IMPL\n");
+            push_to_stack(cpu.X);
+            break;
+        }
+        case TYA_IMPL: {
+            printf("TYA_IMPL\n");
+            cpu.A = cpu.Y;
+            cpu.Z = (cpu.A == 0x00);
+            cpu.N = (cpu.A & 0x80) != 0;
             break;
         }
         default: {
